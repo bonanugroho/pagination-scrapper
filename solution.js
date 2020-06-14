@@ -6,6 +6,7 @@ const { resolve } = require("path");
 
 const baseUrl = "https://www.bankmega.com";
 const listUrl = `${baseUrl}/ajax.promolainnya.php?product=0`;
+const startingPage = "1";
 
 const subcat = [
     {
@@ -40,9 +41,6 @@ const subcat = [
     },
 ];
 
-// subcat.forEach(subcat => {
-//     console.log(subcat.subcatId + "> " + subcat.title);
-// });
 
 async function extractDetailPromo(promoDetailUrl) {
 
@@ -60,21 +58,19 @@ async function extractDetailPromo(promoDetailUrl) {
     const imageurl = baseUrl + $detailBody("#contentpromolain2 > div.keteranganinside > img")
         .attr("src");
 
-    // console.log(title + " " + area + " " + periode + " " + imageurl);
     let item = { title, area, periode, imageurl, promoDetailUrl };
-
-    // console.log(item);
-    // return item;
 
     return new Promise((resolve) => {
         resolve(item);
     })
 }
 
-async function extractPromos(promoUrl){
+async function extractPromos(promoUrl, subCategory){
     const result = await request.get(promoUrl);
     var $body = cheerio.load(result);
     let promosOnPage = [];
+
+    let catName = subCategory.title;
     
     $body("#promolain li a").each( (index,element) => {
         const title = $body(element)
@@ -83,34 +79,38 @@ async function extractPromos(promoUrl){
         const detailUrl = `${baseUrl}/` + $body(element)
         .attr("href");
         
-        // let item = await extractDetailPromo(detailUrl);
-        // promosOnPage[index] = item;
-        // promosOnPage.push(item);
-
-        // extractDetailPromo(detailUrl)
-        //     .then( resultItem => {
-        //         // console.log(resultItem);
-        //         promosOnPage.push(resultItem);
-        //     })
-
-        
-        promosOnPage.push({title, detailUrl});
+        promosOnPage.push({title, detailUrl, catName});
         // console.log("title=" + title + " url=" + detailUrl);
     })
     
     // get by page recursively
-    if (promosOnPage < 1) {
+    if (promosOnPage < 1 && subcat.length < 1) {
         // Terminate no result
-        // return promosOnPage;
         return new Promise((resolve) => {
+            console.log("Stops ...");
             resolve(promosOnPage); 
         });
-    } else {
-        const nextPageNumber = parseInt(promoUrl.match(/page=(\d+)$/)[1], 10) + 1;
-        const nextUrl = `${listUrl}&subcat=3&page=${nextPageNumber}`;
-        // return promosOnPage.concat( await extractPromos(nextUrl));
+    } 
+    if (promosOnPage < 1 && subcat.length >= 1) {
+        let newSubCat = subcat.pop();
+        const nextUrl = `${listUrl}&subcat=${newSubCat.subcatId}&page=${startingPage}`;
+        console.log("Using New Category - " + nextUrl);
         return new Promise((resolve,reject) => {
-            extractPromos(nextUrl)
+            extractPromos(nextUrl, newSubCat)
+            .then((resolvePromoOnPage) => {
+                resolve(promosOnPage.concat( resolvePromoOnPage ));
+            })
+            .catch((err)=>{
+                reject(err);
+            })
+        });
+    } 
+    else {
+        const nextPageNumber = parseInt(promoUrl.match(/page=(\d+)$/)[1], 10) + 1;
+        const nextUrl = `${listUrl}&subcat=${subCategory.subcatId}&page=${nextPageNumber}`;
+        console.log("Using current Category- " + nextUrl);
+        return new Promise((resolve,reject) => {
+            extractPromos(nextUrl, subCategory)
             .then((resolvePromoOnPage) => {
                 resolve(promosOnPage.concat( resolvePromoOnPage ));
             })
@@ -122,40 +122,30 @@ async function extractPromos(promoUrl){
 }
 
 async function main() {
-    const firstUrl = `${listUrl}&subcat=3&page=1`;
-
-    let promoResult = await extractPromos(firstUrl);
-    // extractPromos(firstUrl)
-
-    // Promise.all([extractPromos(firstUrl)])
-    // .then(([promoResult]) => {
-    //     console.log("length = " + promoResult.length);
-    // })
-    // .catch(([err]) => {
-    //     console.log(err);
-    // })
-
-    // extractPromos(firstUrl)
-    // .then(promoResult => {
-    //     console.log(promoResult.length);
-    // })
-
+    let startCategory = subcat.pop();
+    const firstUrl = `${listUrl}&subcat=${startCategory.subcatId}&page=${startingPage}`;
+    console.log("Starting - " + firstUrl);
+    let promoResult = await extractPromos(firstUrl, startCategory);
+    // console.log(promoResult);
 
     let no = 1;  
-    let detailPromoList = {'fnb':[]};
+    let detailPromoList = {};
     var promises = [];
-    promoResult.forEach(element => {
+    var lastCatName = promoResult[0].catName
+    detailPromoList[lastCatName] = []
+
+    promoResult.forEach((element, index) => {
+        // New Category will create new key
+        if (element.catName != lastCatName) {
+            lastCatName = element.catName;
+            detailPromoList[element.catName] = [];
+        }
         promises.push(
             extractDetailPromo(element.detailUrl)
                 .then( resultItem => {
                     // console.log(resultItem);
-                    detailPromoList['fnb'].push(resultItem);
-                    // fs.appendFile('fnb.json', JSON.stringify(resultItem) + ',', function (err) {
-                    //     if (err) throw err;
-                    //     console.log(resultItem);
-                    //   });
+                    detailPromoList[element.catName].push(resultItem);
                 })
-            // detailPromoList['fnb'].push(await extractDetailPromo(element.detailUrl));
 
             // console.log(no + "> title=" + element.title + " url=" + element.detailUrl);
             // no++;
@@ -165,21 +155,15 @@ async function main() {
 
     Promise.all(promises)
         .then(() => {
-            console.log(detailPromoList);
-            fs.appendFile('fnb.json', JSON.stringify(detailPromoList), 'utf8', function (err) {
+            // console.log(detailPromoList);
+            fs.appendFile('solution.json', JSON.stringify(detailPromoList), 'utf8', function (err) {
                 if (err) throw err;
                 console.log('Saved!');
             });
 
         });
-    // console.log(promoResult.length)
-    // detailPromoList.forEach(element => {
-    //     console.log(no);
-    //     console.log(element);
-    //     no++;
-    // })
 
-    // console.log(promoResult.length);
+    
 }
 
 main();
