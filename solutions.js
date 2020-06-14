@@ -40,105 +40,89 @@ const subcat = [
     },
 ];
 
-subcat.forEach(subcat => {
-    console.log(subcat.subcatId + "> " + subcat.title);
-});
+// subcat.forEach(subcat => {
+//     console.log(subcat.subcatId + "> " + subcat.title);
+// });
 
-const extractDetailPromo = (promoDetailUrl) => {
+async function extractDetailPromo(promoDetailUrl) {
 
-    const detailResult =  request.get(promoDetailUrl)
-        // .then(function (fromResolve) {
-            var $detailBody = cheerio.load(detailResult);
+    const detailResult = await request.get(promoDetailUrl)
+    var $detailBody = cheerio.load(detailResult);
 
-            const title = $detailBody("#contentpromolain2 > div.titleinside > h3")
-                .text();
-            const area = $detailBody("#contentpromolain2 > div.area > b")
-                .text();
-            const periode = $detailBody("#contentpromolain2 > div.periode > b:nth-child(1)")
-                .text() + 
-                $detailBody("#contentpromolain2 > div.periode > b:nth-child(2)")
-                .text();
-            const imageurl = baseUrl + $detailBody("#contentpromolain2 > div.keteranganinside > img")
-                .attr("src");
-    
-            let item = { title, area, periode, imageurl, promoDetailUrl };
+    const title = $detailBody("#contentpromolain2 > div.titleinside > h3")
+        .text();
+    const area = $detailBody("#contentpromolain2 > div.area > b")
+        .text();
+    const periode = $detailBody("#contentpromolain2 > div.periode > b:nth-child(1)")
+        .text() + 
+        $detailBody("#contentpromolain2 > div.periode > b:nth-child(2)")
+        .text();
+    const imageurl = baseUrl + $detailBody("#contentpromolain2 > div.keteranganinside > img")
+        .attr("src");
 
-            console.log(item);
-            return item;
-        // })
+    // console.log(title + " " + area + " " + periode + " " + imageurl);
+    let item = { title, area, periode, imageurl, promoDetailUrl };
 
-    // $detailBody()
+    // console.log(item);
+    // return item;
+
+    return new Promise((resolve) => {
+        resolve(item);
+    })
 }
 
-const extractPromos = async (promoUrl) => {
-
+async function extractPromos(promoUrl){
+    const result = await request.get(promoUrl);
+    var $body = cheerio.load(result);
+    let promosOnPage = [];
     
+    $body("#promolain li a").each( (index,element) => {
+        const title = $body(element)
+        .children("#imgClass")
+        .attr("title");
+        const detailUrl = `${baseUrl}/` + $body(element)
+        .attr("href");
+        
+        // let item = await extractDetailPromo(detailUrl);
+        // promosOnPage[index] = item;
+        // promosOnPage.push(item);
 
-    var options = {
-        uri: promoUrl,
-        transform: function (body) {
-            return cheerio.load(body);
-        }
-    }
+        // extractDetailPromo(detailUrl)
+        //     .then( resultItem => {
+        //         // console.log(resultItem);
+        //         promosOnPage.push(resultItem);
+        //     })
 
-    request(options)
-        .then( function ($body) {
-            let promosOnPage = [];
-
-            $body("#promolain li a").each( (index,element) => {
-                const title = $body(element)
-                    .children("#imgClass")
-                    .attr("title");
-                const detailUrl = `${baseUrl}/` + $body(element)
-                    .attr("href");
-                
-                // let item =  extractDetailPromo(detailUrl);
-                // promosOnPage[index] = item;
-                
-                promosOnPage.push({title, detailUrl});
-                // console.log("title=" + title + " url=" + detailUrl);
+        
+        promosOnPage.push({title, detailUrl});
+        // console.log("title=" + title + " url=" + detailUrl);
+    })
+    
+    // get by page recursively
+    if (promosOnPage < 1) {
+        // Terminate no result
+        // return promosOnPage;
+        return new Promise((resolve) => {
+            resolve(promosOnPage); 
+        });
+    } else {
+        const nextPageNumber = parseInt(promoUrl.match(/page=(\d+)$/)[1], 10) + 1;
+        const nextUrl = `${listUrl}&subcat=3&page=${nextPageNumber}`;
+        // return promosOnPage.concat( await extractPromos(nextUrl));
+        return new Promise((resolve,reject) => {
+            extractPromos(nextUrl)
+            .then((resolvePromoOnPage) => {
+                resolve(promosOnPage.concat( resolvePromoOnPage ));
             })
-
-            // get by page recursively
-            if (promosOnPage < 1) {
-                // Terminate no result
-                return promosOnPage;
-                // return new Promise((resolve) => {
-                //     resolve(promosOnPage); 
-                // });
-            } else {
-                const nextPageNumber = parseInt(promoUrl.match(/page=(\d+)$/)[1], 10) + 1;
-                const nextUrl = `${listUrl}&subcat=3&page=${nextPageNumber}`;
-                return promosOnPage.concat( await extractPromos(nextUrl));
-                // return new Promise((resolve,reject) => {
-                //     extractPromos(nextUrl)
-                //     .then((resolvePromoOnPage) => {
-                //         resolve(promosOnPage.concat( resolvePromoOnPage ));
-                //     })
-                //     .catch((err)=>{
-                //         reject(err);
-                //     })
-                    
-                // });
-            }
-        })
-        .catch( function (err) {
-            console.log(err);
-            // return new Promise((reject) => {
-            //     reject(err);
-            // })
-        })
-
-
-
-
-    // const result = request.get(promoUrl);
-    // var $body = cheerio.load(result);
-    
+            .catch((err)=>{
+                reject(err);
+            })
+        });
+    }    
 }
 
 async function main() {
-    const firstUrl = `${listUrl}&subcat=3&page=18`;
+    const firstUrl = `${listUrl}&subcat=3&page=1`;
 
     let promoResult = await extractPromos(firstUrl);
     // extractPromos(firstUrl)
@@ -158,12 +142,44 @@ async function main() {
 
 
     let no = 1;  
+    let detailPromoList = {'fnb':[]};
+    var promises = [];
     promoResult.forEach(element => {
-        console.log(no + "> title=" + element.title + " url=" + element.detailUrl);
-        no++;
+        promises.push(
+            extractDetailPromo(element.detailUrl)
+                .then( resultItem => {
+                    // console.log(resultItem);
+                    detailPromoList['fnb'].push(resultItem);
+                    // fs.appendFile('fnb.json', JSON.stringify(resultItem) + ',', function (err) {
+                    //     if (err) throw err;
+                    //     console.log(resultItem);
+                    //   });
+                })
+            // detailPromoList['fnb'].push(await extractDetailPromo(element.detailUrl));
+
+            // console.log(no + "> title=" + element.title + " url=" + element.detailUrl);
+            // no++;
+        );
     });
 
-    console.log(promoResult.length);
+
+    Promise.all(promises)
+        .then(() => {
+            console.log(detailPromoList);
+            fs.appendFile('fnb.json', JSON.stringify(detailPromoList), 'utf8', function (err) {
+                if (err) throw err;
+                console.log('Saved!');
+            });
+
+        });
+    // console.log(promoResult.length)
+    // detailPromoList.forEach(element => {
+    //     console.log(no);
+    //     console.log(element);
+    //     no++;
+    // })
+
+    // console.log(promoResult.length);
 }
 
 main();
